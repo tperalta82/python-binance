@@ -10,7 +10,7 @@ from .threaded_stream import ThreadedApiManager
 
 class DepthCache(object):
 
-    def __init__(self, symbol, conv_type=float):
+    def __init__(self, symbol, conv_type: Callable = float):
         """Initialise the DepthCache
 
         :param symbol: Symbol to create depth cache for
@@ -23,7 +23,8 @@ class DepthCache(object):
         self._bids = {}
         self._asks = {}
         self.update_time = None
-        self.conv_type = conv_type
+        self.conv_type: Callable = conv_type
+        self._log = logging.getLogger(__name__)
 
     def add_bid(self, bid):
         """Add a bid to the cache
@@ -114,10 +115,15 @@ class DepthCache(object):
         return DepthCache.sort_depth(self._asks, reverse=False, conv_type=self.conv_type)
 
     @staticmethod
-    def sort_depth(vals, reverse=False, conv_type=float):
+    def sort_depth(vals, reverse=False, conv_type: Callable = float):
         """Sort bids or asks by price
         """
-        lst = [[conv_type(price), quantity] for price, quantity in vals.items()]
+        if isinstance(vals, dict):
+            lst = [[conv_type(price), conv_type(quantity)] for price, quantity in vals.items()]
+        elif isinstance(vals, list):
+            lst = [[conv_type(price), conv_type(quantity)] for price, quantity in vals]
+        else:
+            raise ValueError(f'Unknown order book depth data type: {type(vals)}')
         lst = sorted(lst, key=itemgetter(0), reverse=reverse)
         return lst
 
@@ -156,6 +162,7 @@ class BaseDepthCacheManager:
         self._refresh_interval = refresh_interval or self.DEFAULT_REFRESH
         self._conn_key = None
         self._conv_type = conv_type
+        self._log = logging.getLogger(__name__)
 
     async def __aenter__(self):
         await asyncio.gather(
@@ -174,9 +181,7 @@ class BaseDepthCacheManager:
             try:
                 res = await asyncio.wait_for(self._socket.recv(), timeout=self.TIMEOUT)
             except Exception as e:
-
-                logging.warning(e)
-                pass
+                self._log.warning(e)
             else:
                 dc = await self._depth_event(res)
         return dc
@@ -245,6 +250,7 @@ class BaseDepthCacheManager:
         return res
 
     def _apply_orders(self, msg):
+        assert self._depth_cache
         for bid in msg.get('b', []) + msg.get('bids', []):
             self._depth_cache.add_bid(bid)
         for ask in msg.get('a', []) + msg.get('asks', []):
@@ -316,6 +322,7 @@ class DepthCacheManager(BaseDepthCacheManager):
 
         # process bid and asks from the order book
         self._apply_orders(res)
+        assert self._depth_cache
         for bid in res['bids']:
             self._depth_cache.add_bid(bid)
         for ask in res['asks']:
@@ -342,7 +349,7 @@ class DepthCacheManager(BaseDepthCacheManager):
         await super()._start_socket()
 
     def _get_socket(self):
-        return self._bm.depth_socket(self._symbol)
+        return self._bm.depth_socket(self._symbol, interval=self._ws_interval)
 
     async def _process_depth_message(self, msg):
         """Process a depth event message.
@@ -380,6 +387,30 @@ class DepthCacheManager(BaseDepthCacheManager):
         return res
 
 
+class FuturesDepthCacheManager(BaseDepthCacheManager):
+    async def _process_depth_message(self, msg):
+        """Process a depth event message.
+
+        :param msg: Depth event message.
+        :return:
+
+        """
+        msg = msg.get('data')
+        return await super()._process_depth_message(msg)
+
+    def _apply_orders(self, msg):
+        assert self._depth_cache
+        self._depth_cache._bids = msg.get('b', [])
+        self._depth_cache._asks = msg.get('a', [])
+
+        # keeping update time
+        self._depth_cache.update_time = msg.get('E') or msg.get('lastUpdateId')
+
+    def _get_socket(self):
+        sock = self._bm.futures_depth_socket(self._symbol)
+        return sock
+
+
 class OptionsDepthCacheManager(BaseDepthCacheManager):
 
     def _get_socket(self):
@@ -390,14 +421,19 @@ class ThreadedDepthCacheManager(ThreadedApiManager):
 
     def __init__(
         self, api_key: Optional[str] = None, api_secret: Optional[str] = None,
-        requests_params: Dict[str, str] = None, tld: str = 'com',
+        requests_params: Optional[Dict[str, str]] = None, tld: str = 'com',
         testnet: bool = False
     ):
         super().__init__(api_key, api_secret, requests_params, tld, testnet)
 
     def _start_depth_cache(
-        self, dcm_class, callback: Callable, symbol: str, refresh_interval=None, bm=None, limit=10, conv_type=float
+        self, dcm_class, callback: Callable, symbol: str,
+        refresh_interval=None, bm=None, limit=10, conv_type=float, **kwargs
     ) -> str:
+
+        while not self._client:
+            time.sleep(0.01)
+
         dcm = dcm_class(
             client=self._client,
             symbol=symbol,
@@ -405,7 +441,8 @@ class ThreadedDepthCacheManager(ThreadedApiManager):
             refresh_interval=refresh_interval,
             bm=bm,
             limit=limit,
-            conv_type=conv_type
+            conv_type=conv_type,
+            **kwargs
         )
         path = symbol.lower() + '@depth' + str(limit)
         self._socket_running[path] = True
@@ -413,10 +450,24 @@ class ThreadedDepthCacheManager(ThreadedApiManager):
         return path
 
     def start_depth_cache(
-        self, callback: Callable, symbol: str, refresh_interval=None, bm=None, limit=10, conv_type=float
+        self, callback: Callable, symbol: str, refresh_interval=None, bm=None, limit=10, conv_type=float, ws_interval=0
     ) -> str:
         return self._start_depth_cache(
             dcm_class=DepthCacheManager,
+            callback=callback,
+            symbol=symbol,
+            refresh_interval=refresh_interval,
+            bm=bm,
+            limit=limit,
+            conv_type=conv_type,
+            ws_interval=ws_interval
+        )
+
+    def start_futures_depth_socket(
+            self, callback: Callable, symbol: str, refresh_interval=None, bm=None, limit=10, conv_type=float
+    ) -> str:
+        return self._start_depth_cache(
+            dcm_class=FuturesDepthCacheManager,
             callback=callback,
             symbol=symbol,
             refresh_interval=refresh_interval,

@@ -1,6 +1,86 @@
 Changelog
 =========
 
+v1.0.16 - 2022-04-09
+^^^^^^^^^^^^^^^^^^^^
+
+**Added**
+
+- pass limit param to all kline functions
+- increase default for kline functions from 500 to 1000
+- add HistoricalKlinesType.FUTURES_COIN as option for kline functions
+- testnet URL for coin_futures_socket
+
+**Updated**
+
+- round_step_size more accurate
+
+**Fixed**
+
+- remove deprecated loop param
+- websockets unpinned
+- hanging websockets in exiting state
+- check start_ts after end_ts for klines
+- multi assets margin params
+
+
+v1.0.15 - 2021-09-27
+^^^^^^^^^^^^^^^^^^^^
+
+**Added**
+
+- Enable/disable margin account for symbol endpoints
+- Top trader long/short positions endpoint
+- Global long/short ratio endpoint
+
+**Fixed**
+
+- fix websockets to 9.1
+- websocket reconnect updates
+- fix futures kline sockets
+
+
+v1.0.14 - 2021-09-08
+^^^^^^^^^^^^^^^^^^^^
+
+**Fixed**
+
+- websocket reconnecting
+
+v1.0.13 - 2021-09-08
+^^^^^^^^^^^^^^^^^^^^
+
+**Added**
+
+- Futures Depth Cache Manager
+- Futures kline websocket stream
+- Coin Futures User websocket stream
+- New Margin endpoints
+- Margin OCO order endpoints
+- Fiat endpoints
+- C2C endpoints
+- Account API permissions endpoint
+
+**Fixed**
+
+- changed `asset` to `coin` in withdraw endpoint
+
+
+v1.0.12 - 2021-06-03
+^^^^^^^^^^^^^^^^^^^^
+
+**Added**
+
+- coin futures batch order function
+
+**Fixed**
+
+- threaded websockets on python3.9
+- filter out None params in request kwargs
+- deconflict streams with same name on different websocket urls
+- reduce close timeout on websocket close to short time to reduce waiting
+
+
 v1.0.10 - 2021-05-13
 ^^^^^^^^^^^^^^^^^^^^
 
